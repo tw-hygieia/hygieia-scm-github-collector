@@ -30,7 +30,7 @@ github.errorThreshold=${GITHUB_ERROR_THRESHOLD:-1}
 github.key=${GITHUB_KEY}
 
 #personal access token generated from github and used for making authentiated calls
-github.personalAccessToken=${PERSONAL_ACCESS_TOKEN}
+github.personalAccessToken=${GITHUB_PERSONAL_ACCESS_TOKEN}
 
 EOF
 
