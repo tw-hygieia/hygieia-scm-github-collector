@@ -15,13 +15,11 @@ import com.capitalone.dashboard.repository.CommitRepository;
 import com.capitalone.dashboard.repository.ComponentRepository;
 import com.capitalone.dashboard.repository.GitHubRepoRepository;
 import com.capitalone.dashboard.repository.GitRequestRepository;
-import com.mongodb.util.JSON;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.bson.types.ObjectId;
-import org.json.simple.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.TaskScheduler;
@@ -59,7 +57,8 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     private static final long FOURTEEN_DAYS_MILLISECONDS = 14 * 24 * 60 * 60 * 1000;
     private static final String API_RATE_LIMIT_MESSAGE = "API rate limit exceeded";
     private List<Pattern> commitExclusionPatterns = new ArrayList<>();
-    int MILLIS_IN_A_MINUTE = 60000;
+    int ONE_MINUTE_MILLISECONDS = 1 * 60 * 1000;
+    private List<String> collectedRepositories = new ArrayList<>();
 
     @Autowired
     public GitHubCollectorTask(TaskScheduler taskScheduler,
@@ -168,20 +167,20 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         int commitCount = 0;
         int pullCount = 0;
         int issueCount = 0;
-       
+
         clean(collector);
-        
+
         String proxyUrl = gitHubSettings.getProxy();
         String proxyPort = gitHubSettings.getProxyPort();
         String proxyUser= gitHubSettings.getProxyUser();
         String proxyPassword= gitHubSettings.getProxyPassword();
-        
+
         if (!StringUtils.isEmpty(proxyUrl) && !StringUtils.isEmpty(proxyPort)) {
             System.setProperty("http.proxyHost", proxyUrl);
             System.setProperty("https.proxyHost", proxyUrl);
             System.setProperty("http.proxyPort", proxyPort);
             System.setProperty("https.proxyPort", proxyPort);
-        
+
          if (!StringUtils.isEmpty(proxyUser) && !StringUtils.isEmpty(proxyPassword)) {
             System.setProperty("http.proxyUser", proxyUser);
             System.setProperty("https.proxyUser", proxyUser);
@@ -189,11 +188,15 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
             System.setProperty("https.proxyPassword", proxyPassword);
          }
          }
-            
+
          for (GitHubRepo repo : enabledRepos(collector)) {
-             repo.checkErrorOrReset(MILLIS_IN_A_MINUTE, gitHubSettings.getErrorThreshold() );
+             repo.checkErrorOrReset(ONE_MINUTE_MILLISECONDS, gitHubSettings.getErrorThreshold() );
              if (repo.getErrorCount() < gitHubSettings.getErrorThreshold()) {
-                boolean firstRun = ((repo.getLastUpdated() == 0) || ((start - repo.getLastUpdated()) > FOURTEEN_DAYS_MILLISECONDS));
+               String repoUrl = repo.getRepoUrl();
+
+               boolean firstRun = ((repo.getLastUpdated() == 0) || ((start - repo.getLastUpdated()) > FOURTEEN_DAYS_MILLISECONDS)
+               || !collectedRepositories.contains(repoUrl));
+               collectedRepositories.add(repoUrl);
                 repo.removeLastUpdateDate();  //moved last update date to collector item. This is to clean old data.
                 try {
                     LOG.info(repo.getOptions().toString() + "::" + repo.getBranch() + ":: get commits");
@@ -226,7 +229,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
 
                     repo.setLastUpdated(System.currentTimeMillis());
                 } catch (HttpStatusCodeException hc) {
-                    LOG.error("Error fetching commits for:" + repo.getRepoUrl(), hc);
+                    LOG.error("Error fetching commits for:" + repoUrl, hc);
                     if (! (isRateLimitError(hc) || hc.getStatusCode() == HttpStatus.SERVICE_UNAVAILABLE) ) {
                         CollectionError error = new CollectionError(hc.getStatusCode().toString(), hc.getMessage());
                         repo.getErrors().add(error);
@@ -234,19 +237,19 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                 } catch (ResourceAccessException ex) {
                     //handle case where repo is valid but github returns connection refused due to outages??
                     if (ex.getMessage() != null && ex.getMessage().contains("Connection refused")) {
-                        LOG.error("Error fetching commits for:" + repo.getRepoUrl(), ex);
+                        LOG.error("Error fetching commits for:" + repoUrl, ex);
                     } else {
-                        LOG.error("Error fetching commits for:" + repo.getRepoUrl(), ex);
-                        CollectionError error = new CollectionError(CollectionError.UNKNOWN_HOST, repo.getRepoUrl());
+                        LOG.error("Error fetching commits for:" + repoUrl, ex);
+                        CollectionError error = new CollectionError(CollectionError.UNKNOWN_HOST, repoUrl);
                         repo.getErrors().add(error);
                     }
                 } catch (RestClientException | MalformedURLException ex) {
-                    LOG.error("Error fetching commits for:" + repo.getRepoUrl(), ex);
-                    CollectionError error = new CollectionError(CollectionError.UNKNOWN_HOST, repo.getRepoUrl());
+                    LOG.error("Error fetching commits for:" + repoUrl, ex);
+                    CollectionError error = new CollectionError(CollectionError.UNKNOWN_HOST, repoUrl);
                     repo.getErrors().add(error);
                 } catch (HygieiaException he) {
-                    LOG.error("Error fetching commits for:" + repo.getRepoUrl(), he);
-                    CollectionError error = new CollectionError("Bad repo url", repo.getRepoUrl());
+                    LOG.error("Error fetching commits for:" + repoUrl);
+                    CollectionError error = new CollectionError("Bad repo url", repoUrl);
                     repo.getErrors().add(error);
                 }
                 gitHubRepoRepository.save(repo);
