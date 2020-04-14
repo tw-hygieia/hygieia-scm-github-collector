@@ -15,11 +15,13 @@ import com.capitalone.dashboard.repository.CommitRepository;
 import com.capitalone.dashboard.repository.ComponentRepository;
 import com.capitalone.dashboard.repository.GitHubRepoRepository;
 import com.capitalone.dashboard.repository.GitRequestRepository;
+import com.mongodb.util.JSON;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.bson.types.ObjectId;
+import org.json.simple.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.TaskScheduler;
@@ -57,6 +59,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     private static final long FOURTEEN_DAYS_MILLISECONDS = 14 * 24 * 60 * 60 * 1000;
     private static final String API_RATE_LIMIT_MESSAGE = "API rate limit exceeded";
     private List<Pattern> commitExclusionPatterns = new ArrayList<>();
+    int MILLIS_IN_A_MINUTE = 60000;
 
     @Autowired
     public GitHubCollectorTask(TaskScheduler taskScheduler,
@@ -150,7 +153,6 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         gitID.add(collector.getId());
         for (GitHubRepo repo : gitHubRepoRepository.findByCollectorIdIn(gitID)) {
             if (repo.isPushed()) {continue;}
-
             repo.setEnabled(uniqueIDs.contains(repo.getId()));
             repoList.add(repo);
         }
@@ -189,7 +191,8 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
          }
             
          for (GitHubRepo repo : enabledRepos(collector)) {
-            if (repo.getErrorCount() < gitHubSettings.getErrorThreshold()) {
+             repo.checkErrorOrReset(MILLIS_IN_A_MINUTE, gitHubSettings.getErrorThreshold() );
+             if (repo.getErrorCount() < gitHubSettings.getErrorThreshold()) {
                 boolean firstRun = ((repo.getLastUpdated() == 0) || ((start - repo.getLastUpdated()) > FOURTEEN_DAYS_MILLISECONDS));
                 repo.removeLastUpdateDate();  //moved last update date to collector item. This is to clean old data.
                 try {
