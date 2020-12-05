@@ -21,16 +21,22 @@ github.cron=${GITHUB_CRON:-0 0/5 * * * *}
 github.host=${GITHUB_HOST:-github.com}
 
 #Maximum number of days to go back in time when fetching commits
-github.commitThresholdDays=${GITHUB_COMMIT_THRESHOLD_DAYS:-15}
+github.firstRunHistoryDays=${GITHUB_COMMIT_THRESHOLD_DAYS:-90}
 
 #Optional: Error threshold count after which collector stops collecting for a collector item. Default is 2.
 github.errorThreshold=${GITHUB_ERROR_THRESHOLD:-1}
 
-#This is the key generated using the Encryption class in core
+#This is the key generated using the Encryption class in core - UNUSED FOR NOW
 github.key=${GITHUB_KEY}
 
 #personal access token generated from github and used for making authentiated calls
 github.personalAccessToken=${GITHUB_PERSONAL_ACCESS_TOKEN}
+
+#Proxy settings
+proxy.user=${PROXY_USER}
+proxy.password=${PROXY_PASSWORD}
+proxy.port=${PROXY_PORT}
+proxy.host=${PROXY_HOST}
 
 EOF
 

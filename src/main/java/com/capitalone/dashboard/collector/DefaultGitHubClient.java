@@ -11,7 +11,6 @@ import com.capitalone.dashboard.model.GitRequest;
 import com.capitalone.dashboard.model.Review;
 import com.capitalone.dashboard.util.Encryption;
 import com.capitalone.dashboard.util.EncryptionException;
-import com.capitalone.dashboard.util.Supplier;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -31,6 +30,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestOperations;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.UnsupportedEncodingException;
 import java.net.MalformedURLException;
@@ -63,9 +63,9 @@ public class DefaultGitHubClient implements GitHubClient {
 
     @Autowired
     public DefaultGitHubClient(GitHubSettings settings,
-                               Supplier<RestOperations> restOperationsSupplier) {
+                               RestTemplate restTemplate) {
         this.settings = settings;
-        this.restOperations = restOperationsSupplier.get();
+        this.restOperations = restTemplate;
     }
 
     /**
@@ -89,14 +89,11 @@ public class DefaultGitHubClient implements GitHubClient {
 
         String queryUrl = apiUrl.concat("/commits?sha=" + repo.getBranch()
                 + "&since=" + getTimeForApi(getRunDate(repo, firstRun)));
-        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
-        String personalAccessToken = (String) repo.getOptions().get("personalAccessToken");
-        String decryptedPersonalAccessToken = decryptString(personalAccessToken, settings.getKey());
         boolean lastPage = false;
         String queryUrlPage = queryUrl;
         while (!lastPage) {
             LOG.info("Executing " + queryUrlPage);
-            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword,decryptedPersonalAccessToken);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage);
             JSONArray jsonArray = parseAsArray(response);
             for (Object item : jsonArray) {
                 JSONObject jsonObject = (JSONObject) item;
@@ -110,7 +107,7 @@ public class DefaultGitHubClient implements GitHubClient {
                 JSONObject authorObject = (JSONObject) jsonObject.get("author");
                 String authorLogin = "";
                 if (authorObject != null) {
-                    authorLogin = str(authorObject, "login");
+                    authorLogin = str(authorObject, "lxogin");
                 }
                 JSONArray parents = (JSONArray) jsonObject.get("parents");
                 List<String> parentShas = new ArrayList<>();
@@ -177,11 +174,8 @@ public class DefaultGitHubClient implements GitHubClient {
     public List<GitRequest> getPulls(GitHubRepo repo, String status, boolean firstRun, Map<Long, String> prMap) throws MalformedURLException, HygieiaException {
 
         List<GitRequest> pulls = new ArrayList<>();
-        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
         GitHubParsed gitHubParsed = new GitHubParsed((String) repo.getOptions().get("url"));
         String branch = (repo.getBranch() != null) ? repo.getBranch() : "master";
-        String personalAccessToken = (String) repo.getOptions().get("personalAccessToken");
-        String decryptedPersonalAccessToken = decryptString(personalAccessToken, settings.getKey());
 
         String pageUrl = gitHubParsed.getApiUrl().concat("/pulls?state=" + status + "&base=" + branch + "&sort=updated&direction=desc");
 
@@ -191,7 +185,7 @@ public class DefaultGitHubClient implements GitHubClient {
 
         while (!lastPage && !stop) {
             LOG.info("Executing [" + queryUrlPage);
-            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword,decryptedPersonalAccessToken);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage);
             JSONArray jsonArray = parseAsArray(response);
             for (Object item : jsonArray) {
                 JSONObject jsonObject = (JSONObject) item;
@@ -262,12 +256,12 @@ public class DefaultGitHubClient implements GitHubClient {
                 }
 
                 pull.setCommentsUrl(commentsUrl);
-                List<Comment> comments = getComments(commentsUrl, repo);
+                List<Comment> comments = getComments(commentsUrl);
                 pull.setComments(comments);
                 pull.setReviewCommentsUrl(reviewCommentsUrl);
-                List<CommitStatus> commitStatuses = getCommitStatuses(commitStatusesUrl, repo);
+                List<CommitStatus> commitStatuses = getCommitStatuses(commitStatusesUrl);
                 pull.setCommitStatuses(commitStatuses);
-                List<Review> reviews = getReviews(reviewsUrl, repo);
+                List<Review> reviews = getReviews(reviewsUrl);
                 pull.setReviews(reviews);
                 pull.setCommitStatuses(commitStatuses);
                 pulls.add(pull);
@@ -306,16 +300,12 @@ public class DefaultGitHubClient implements GitHubClient {
 
         GitHubParsed gitHubParsed = new GitHubParsed((String) repo.getOptions().get("url"));
         String apiUrl = gitHubParsed.getApiUrl();
-        // decrypt password
-        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
         String queryUrl = apiUrl.concat("/issues?state=all&since=" + getTimeForApi(getRunDate(repo, firstRun)));
-        String personalAccessToken = (String) repo.getOptions().get("personalAccessToken");
-        String decryptedPersonalAccessToken = decryptString(personalAccessToken, settings.getKey());
         boolean lastPage = false;
         String queryUrlPage = queryUrl;
         while (!lastPage) {
             LOG.info("Executing " + queryUrlPage);
-            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword,decryptedPersonalAccessToken);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage);
             JSONArray jsonArray = parseAsArray(response);
             for (Object item : jsonArray) {
                 JSONObject jsonObject = (JSONObject) item;
@@ -374,24 +364,16 @@ public class DefaultGitHubClient implements GitHubClient {
     /**
      * Get comments from the given comment url
      * @param commentsUrl
-     * @param repo
      * @return
      * @throws RestClientException
      */
-    public List<Comment> getComments(String commentsUrl, GitHubRepo repo) throws RestClientException {
+    public List<Comment> getComments(String commentsUrl) throws RestClientException {
 
         List<Comment> comments = new ArrayList<>();
-
-        // decrypt password
-        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
-
-        String personalAccessToken = (String) repo.getOptions().get("personalAccessToken");
-        String decryptedPersonalAccessToken = decryptString(personalAccessToken, settings.getKey());
-
         boolean lastPage = false;
         String queryUrlPage = commentsUrl;
         while (!lastPage) {
-            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword,decryptedPersonalAccessToken);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage);
             JSONArray jsonArray = parseAsArray(response);
             for (Object item : jsonArray) {
                 JSONObject jsonObject = (JSONObject) item;
@@ -428,22 +410,16 @@ public class DefaultGitHubClient implements GitHubClient {
      * and https://developer.github.com/v3/repos/statuses/#get-the-combined-status-for-a-specific-ref
      *
      * @param statusUrl
-     * @param repo
      * @return
      * @throws RestClientException
      */
-    public List<CommitStatus> getCommitStatuses(String statusUrl, GitHubRepo repo) throws RestClientException {
+    public List<CommitStatus> getCommitStatuses(String statusUrl) throws RestClientException {
 
         Map<String, CommitStatus> statuses = new HashMap<>();
-
-        // decrypt password
-        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
-        String personalAccessToken = (String) repo.getOptions().get("personalAccessToken");
-        String decryptedPersonalAccessToken = decryptString(personalAccessToken, settings.getKey());
         boolean lastPage = false;
         String queryUrlPage = statusUrl;
         while (!lastPage) {
-            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword,decryptedPersonalAccessToken);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage);
             JSONArray jsonArray = parseAsArray(response);
             for (Object item : jsonArray) {
                 JSONObject jsonObject = (JSONObject) item;
@@ -474,22 +450,16 @@ public class DefaultGitHubClient implements GitHubClient {
     /**
      * Get reviews from the given reviews url
      * @param reviewsUrl
-     * @param repo
      * @return
      * @throws RestClientException
      */
-    public List<Review> getReviews(String reviewsUrl, GitHubRepo repo) throws RestClientException {
+    public List<Review> getReviews(String reviewsUrl) throws RestClientException {
 
         List<Review> reviews = new ArrayList<>();
-
-        // decrypt password
-        String decryptedPassword = decryptString(repo.getPassword(), settings.getKey());
-        String personalAccessToken = (String) repo.getOptions().get("personalAccessToken");
-        String decryptedPersonalAccessToken = decryptString(personalAccessToken, settings.getKey());
         boolean lastPage = false;
         String queryUrlPage = reviewsUrl;
         while (!lastPage) {
-            ResponseEntity<String> response = makeRestCall(queryUrlPage, repo.getUserId(), decryptedPassword,decryptedPersonalAccessToken);
+            ResponseEntity<String> response = makeRestCall(queryUrlPage);
             JSONArray jsonArray = parseAsArray(response);
             for (Object item : jsonArray) {
                 JSONObject jsonObject = (JSONObject) item;
@@ -584,14 +554,9 @@ public class DefaultGitHubClient implements GitHubClient {
         return rateLimitReached;
     }
 
-    private ResponseEntity<String> makeRestCall(String url, String userId,
-                                                String password,String personalAccessToken) {
-        // Basic Auth only.
-        if (!"".equals(userId) && !"".equals(password)) {
-            return restOperations.exchange(url, HttpMethod.GET, new HttpEntity<>(createHeaders(userId, password)), String.class);
-        } else if ((personalAccessToken!=null && !"".equals(personalAccessToken)) ) {
-            return restOperations.exchange(url, HttpMethod.GET,new HttpEntity<>(createHeaders(personalAccessToken)),String.class);
-        } else if (settings.getPersonalAccessToken() != null && !"".equals(settings.getPersonalAccessToken())){
+    private ResponseEntity<String> makeRestCall(String url) {
+        //TODO Use personal access token from options object in the Hygieia Github config
+        if (settings.getPersonalAccessToken() != null && !"".equals(settings.getPersonalAccessToken())){
             return restOperations.exchange(url, HttpMethod.GET, new HttpEntity<>(createHeaders(settings.getPersonalAccessToken())), String.class);
         }else {
             return restOperations.exchange(url, HttpMethod.GET, null, String.class);
