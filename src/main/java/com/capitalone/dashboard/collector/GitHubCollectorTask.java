@@ -2,14 +2,7 @@ package com.capitalone.dashboard.collector;
 
 
 import com.capitalone.dashboard.misc.HygieiaException;
-import com.capitalone.dashboard.model.CollectionError;
-import com.capitalone.dashboard.model.Collector;
-import com.capitalone.dashboard.model.CollectorItem;
-import com.capitalone.dashboard.model.CollectorType;
-import com.capitalone.dashboard.model.Commit;
-import com.capitalone.dashboard.model.CommitType;
-import com.capitalone.dashboard.model.GitHubRepo;
-import com.capitalone.dashboard.model.GitRequest;
+import com.capitalone.dashboard.model.*;
 import com.capitalone.dashboard.repository.BaseCollectorRepository;
 import com.capitalone.dashboard.repository.CommitRepository;
 import com.capitalone.dashboard.repository.ComponentRepository;
@@ -54,6 +47,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
     private final GitHubClient gitHubClient;
     private final GitHubSettings gitHubSettings;
     private final ComponentRepository dbComponentRepository;
+    private PipelineCommitProcessor pipelineCommitProcessor;
     private static final long FOURTEEN_DAYS_MILLISECONDS = 14 * 24 * 60 * 60 * 1000;
     private static final String API_RATE_LIMIT_MESSAGE = "API rate limit exceeded";
     private List<Pattern> commitExclusionPatterns = new ArrayList<>();
@@ -68,7 +62,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                                GitRequestRepository gitRequestRepository,
                                GitHubClient gitHubClient,
                                GitHubSettings gitHubSettings,
-                               ComponentRepository dbComponentRepository) {
+                               ComponentRepository dbComponentRepository, PipelineCommitProcessor pipelineCommitProcessor) {
         super(taskScheduler, "GitHub");
         this.collectorRepository = collectorRepository;
         this.gitHubRepoRepository = gitHubRepoRepository;
@@ -77,6 +71,7 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
         this.gitHubSettings = gitHubSettings;
         this.dbComponentRepository = dbComponentRepository;
         this.gitRequestRepository = gitRequestRepository;
+        this.pipelineCommitProcessor = pipelineCommitProcessor;
         if (!CollectionUtils.isEmpty(gitHubSettings.getNotBuiltCommits())) {
             for (String regExStr : gitHubSettings.getNotBuiltCommits()) {
                 Pattern pattern = Pattern.compile(regExStr, Pattern.CASE_INSENSITIVE);
@@ -182,14 +177,16 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
                 try {
                     LOG.info(repo.getOptions().toString() + "::" + repo.getBranch() + ":: get commits");
                     // Step 1: Get all the commits
-                    for (Commit commit : gitHubClient.getCommits(repo, firstRun, commitExclusionPatterns)) {
+                    List<Commit> commits = gitHubClient.getCommits(repo, firstRun, commitExclusionPatterns);
+                    for (Commit commit : commits) {
                         LOG.debug(commit.getTimestamp() + ":::" + commit.getScmCommitLog());
+                        commit.setCollectorItemId(repo.getId());
                         if (isNewCommit(repo, commit)) {
-                            commit.setCollectorItemId(repo.getId());
                             commitRepository.save(commit);
                             commitCount++;
                         }
                     }
+                    pipelineCommitProcessor.processPipelineCommits(commits);
 
                     // Step 2: Get all the issues
                     LOG.info(repo.getOptions().toString() + "::" + repo.getBranch() + " get issues");
@@ -244,7 +241,6 @@ public class GitHubCollectorTask extends CollectorTask<Collector> {
 
         log("Finished", start);
     }
-
 
     private int processList(GitHubRepo repo, List<GitRequest> entries, String type) {
         int count = 0;
