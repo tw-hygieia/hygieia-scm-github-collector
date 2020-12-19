@@ -80,6 +80,18 @@ public class DefaultGitHubClient implements GitHubClient {
     @Override
     public List<Commit> getCommits(GitHubRepo repo, boolean firstRun, List<Pattern> commitExclusionPatterns) throws RestClientException, MalformedURLException, HygieiaException {
 
+        List<Commit> allCommits = new ArrayList<>();
+        String[] branches = repo.getBranch().split(",");
+        for (String branch :
+                branches) {
+            LOG.info("Fetching commits for branch " + branch);
+            List<Commit> commitsForBranch = getCommitsForBranch(repo, firstRun, commitExclusionPatterns, branch);
+            allCommits.addAll(commitsForBranch);
+        }
+        return allCommits;
+    }
+
+    private List<Commit> getCommitsForBranch(GitHubRepo repo, boolean firstRun, List<Pattern> commitExclusionPatterns, String branch) throws MalformedURLException, HygieiaException {
         List<Commit> commits = new ArrayList<>();
 
         // format URL
@@ -87,7 +99,7 @@ public class DefaultGitHubClient implements GitHubClient {
         GitHubParsed gitHubParsed = new GitHubParsed(repoUrl);
         String apiUrl = gitHubParsed.getApiUrl();
 
-        String queryUrl = apiUrl.concat("/commits?sha=" + repo.getBranch()
+        String queryUrl = apiUrl.concat("/commits?sha=" + branch
                 + "&since=" + getTimeForApi(getRunDate(repo, firstRun)));
         boolean lastPage = false;
         String queryUrlPage = queryUrl;
@@ -173,9 +185,17 @@ public class DefaultGitHubClient implements GitHubClient {
     @SuppressWarnings({"PMD.NPathComplexity", "PMD.ExcessiveMethodLength", "PMD.NcssMethodCount"}) // agreed, fixme
     public List<GitRequest> getPulls(GitHubRepo repo, String status, boolean firstRun, Map<Long, String> prMap) throws MalformedURLException, HygieiaException {
 
+        List<GitRequest> allGitRequests = new ArrayList<>();
+        String[] branches = (repo.getBranch() != null) ? repo.getBranch().split(",") : new String[]{"master"};
+        for(String branch: branches) {
+            allGitRequests.addAll(getGitRequestsForBranch(repo, status, prMap, branch));
+        }
+        return allGitRequests;
+    }
+
+    private List<GitRequest> getGitRequestsForBranch(GitHubRepo repo, String status, Map<Long, String> prMap, String branch) throws MalformedURLException, HygieiaException {
         List<GitRequest> pulls = new ArrayList<>();
         GitHubParsed gitHubParsed = new GitHubParsed((String) repo.getOptions().get("url"));
-        String branch = (repo.getBranch() != null) ? repo.getBranch() : "master";
 
         String pageUrl = gitHubParsed.getApiUrl().concat("/pulls?state=" + status + "&base=" + branch + "&sort=updated&direction=desc");
 
